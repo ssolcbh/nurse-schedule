@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#082f3a">
-<title>ระบบจัดตารางเวรพยาบาล v2.8 (Online)</title>
+<title>ระบบจัดตารางเวรพยาบาล v1.0 (Online)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -2495,7 +2495,7 @@ function resetOTDefaults() {
   state.otSettings = JSON.parse(JSON.stringify(DEFAULT_OT));
   state.dirty = true;
   renderOT();
-  showSuccess('รีเซ็ตเรียบร้อย', 'ค่า OT กลับเป็นค่าเริ่มต้น v2.8');
+  showSuccess('รีเซ็ตเรียบร้อย', 'ค่า OT กลับเป็นค่าเริ่มต้น v1.0');
 }
 
 // ==================== NURSES MANAGEMENT ====================
@@ -2856,7 +2856,7 @@ function renderHelp() {
   document.getElementById('helpGrid').innerHTML = `
     <div class="help-card cyan"><h4>🚀 เริ่มต้นใช้งาน</h4><ol><li>เลือกเดือน/ปี ที่ส่วนหัว</li><li>ปรับอัตรากำลัง (ช/บ/ด ของวันธรรมดา/วันหยุด)</li><li>ใส่วันลา (V/T) ที่แท็บ "วันลา"</li><li>ล็อกเวรพิเศษ (ถ้าต้องการ) — กดปุ่ม "🔒 โหมดล็อก"</li><li>กด "⚡ จัดเวรอัตโนมัติ"</li><li>กด "💾 บันทึก"</li></ol></div>
     <div class="help-card amber"><h4>📅 วันหยุดราชการ</h4><p style="font-size:.8rem;color:#92400e">ระบบจัดการวันหยุดราชการไทยอัตโนมัติ — ปีใหม่, สงกรานต์, วันสำคัญทางพุทธศาสนา, วันชาติฯ ดูและแก้ไขได้ที่ปุ่ม "📅 วันหยุด" ที่หัวเว็บ</p><ul><li>1 ม.ค. ปีใหม่</li><li>6 เม.ย. วันจักรี</li><li>13-15 เม.ย. สงกรานต์</li><li>วันมาฆบูชา/วิสาขบูชา/อาสาฬหบูชา/เข้าพรรษา</li><li>เพิ่ม "วันหยุดพิเศษ" ของหน่วยงานเองได้</li></ul></div>
-    <div class="help-card red"><h4>🚫 กฎห้าม (v2.8)</h4>
+    <div class="help-card red"><h4>🚫 กฎห้าม (v1.0)</h4>
       <p style="font-size:.82rem;color:#7f1d1d;margin:6px 0"><b>กฎ A: ห้าม "เวรบ่าย → เวรดึก" ข้ามวัน</b></p>
       <p style="font-size:.76rem;color:#991b1b;margin:0 0 6px">เวรที่มี <b>บ่าย</b> = บ / ชบ / ดบ &nbsp;|&nbsp; เวรที่มี <b>ดึก</b> = ด / ดบ / DN</p>
       <table style="width:100%;font-size:.74rem;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;margin:6px 0">
@@ -2867,14 +2867,14 @@ function renderHelp() {
           <tr style="border-top:1px solid #fee2e2"><td style="padding:4px 6px"><b>ดบ</b></td><td style="padding:4px;color:#065f46">ช, ชบ, บ, O</td><td style="padding:4px;color:#991b1b">ด, ดบ, DN</td></tr>
         </tbody>
       </table>
-      <p style="font-size:.82rem;color:#7f1d1d;margin:8px 0 4px"><b>กฎ B: ห้าม "O → เวรดึก" (NEW v2.8)</b></p>
+      <p style="font-size:.82rem;color:#7f1d1d;margin:8px 0 4px"><b>กฎ B: ห้าม "O → เวรดึก" (NEW v1.0)</b></p>
       <p style="font-size:.74rem;color:#991b1b;margin:0">หลัง O (วันหยุด) ห้ามขึ้น ด/ดบ/DN — ต้องเริ่มด้วย ช หรือ บ</p>
       <p style="font-size:.78rem;color:#7f1d1d;margin:8px 0 0"><b>หัวหน้า/รอง:</b> ขึ้นได้แค่ ช หรือ ชบ ในวันทำการ และ O ในวันหยุด</p>
       <p style="font-size:.72rem;color:#64748b;margin:6px 0 0">💡 ทั้งกฎ A และ B ปรับเป็น "เตือน" ได้ใน <b>⚙️ ตั้งค่าขั้นสูง</b></p>
     </div>
     <div class="help-card cyan"><h4>📋 ประเภทเวร 9 แบบ</h4><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;font-size:.74rem"><span><b>ช</b> เช้า</span><span><b>บ</b> บ่าย</span><span><b>ด</b> ดึก</span><span><b>ชบ</b> โย้หน้า</span><span><b>ดบ</b> โย้หลัง</span><span><b>DN</b> ช+ด</span><span><b>O</b> OFF</span><span><b>V</b> ลาพักร้อน</span><span><b>T</b> ลาประชุม</span></div></div>
     <div class="help-card emerald"><h4>⚙️ Algorithm 10 ขั้น</h4><ol style="font-size:.78rem"><li>ล้างเวรเดิม (เว้นที่ล็อก)</li><li>ตรวจความถูกต้องของเซลล์ที่ล็อก</li><li>วาง ช ให้หัวหน้า/รอง</li><li>วาง ด → ช → บ (ตามอัตรากำลัง)</li><li>กระจาย ชบ + ดบ (ทุกคน ≥1)</li><li>แก้ บ→ด (ถ้าไม่ผ่อนปรน)</li><li>แก้ O→ด (NEW v2.8)</li><li>เติม O ที่เหลือ</li><li>เช็คความถูกต้อง</li><li>คำเตือนกำลังคน</li></ol></div>
-    <div class="help-card rose"><h4>🔒 ระบบล็อกเวร (NEW v2.8)</h4><ul><li>เปิด "<b>🔒 โหมดล็อก</b>" จากหัวเว็บ → คลิกเซลล์เพื่อล็อก</li><li>ปุ่ม "<b>🔒 ล็อก จ/พ/ศ = เช้า</b>" — เปิด dialog เลือกพยาบาล/วัน/เวร แบบ bulk</li><li>เหมาะกับ <b>งานประกันคุณภาพ</b> ที่ต้องอยู่จันทร์/พุธ/ศุกร์ เช้า</li><li>เซลล์ที่ล็อก = ขอบแดง + ไอคอน 🔒 — Auto-Schedule ไม่แตะ</li></ul></div>
+    <div class="help-card rose"><h4>🔒 ระบบล็อกเวร (NEW v1.0)</h4><ul><li>เปิด "<b>🔒 โหมดล็อก</b>" จากหัวเว็บ → คลิกเซลล์เพื่อล็อก</li><li>ปุ่ม "<b>🔒 ล็อก จ/พ/ศ = เช้า</b>" — เปิด dialog เลือกพยาบาล/วัน/เวร แบบ bulk</li><li>เหมาะกับ <b>งานประกันคุณภาพ</b> ที่ต้องอยู่จันทร์/พุธ/ศุกร์ เช้า</li><li>เซลล์ที่ล็อก = ขอบแดง + ไอคอน 🔒 — Auto-Schedule ไม่แตะ</li></ul></div>
     <div class="help-card cyan"><h4>💾 ที่เก็บข้อมูล</h4><p style="font-size:.8rem">ข้อมูลเก็บใน <b>LocalStorage</b> ของเบราว์เซอร์ (key: smnc_nurse_schedule_v28)</p><ul><li>บันทึกอัตโนมัติทุก 60 วินาที</li><li>เตือนเมื่อปิดหน้าโดยไม่ได้บันทึก</li><li>ข้อมูลเก่าจะถูกโอนอัตโนมัติ</li></ul></div>
     <div class="help-card red"><h4>📞 ติดต่อผู้จัดทำระบบ : งานสุขภาพดิจิทัล</h4><div style="font-size:.85rem;color:#7f1d1d"><b>IT LCBH</b><br>📞 4003<br>🏥 โรงพยาบาลแหลมฉบัง</div></div>`;
 }
