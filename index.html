@@ -298,6 +298,10 @@ table.schedule td.stat-col[style*="0891b2"]{background:var(--brand)!important;co
 .nd-item{display:flex;align-items:center;gap:7px;font-size:.8rem;color:var(--ink);cursor:pointer;padding:4px 8px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface-2)}
 .nd-item.on{background:#fee2e2;border-color:#fca5a5;color:#991b1b;font-weight:700}
 .nd-item input{width:16px;height:16px;accent-color:#dc2626;cursor:pointer}
+/* NEW: ห้ามเวรดึกชนกัน (รายคน) + ห้ามขึ้นเวรวันที่ 1 หลังดึกวันสุดท้ายของเดือนก่อน */
+.cell.boundary-block{outline:2px dashed #dc2626;outline-offset:-2px}
+.nc-note{font-size:.76rem;color:var(--ink-3);margin-top:6px}
+.nc-chip{display:inline-block;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:9999px;padding:1px 9px;font-size:.74rem;font-weight:700;margin:2px 3px 0 0}
 table.schedule tfoot td{position:sticky;bottom:0;font-weight:800;font-size:.78rem;padding:5px 2px;border-top:2px solid var(--brand-900);z-index:2}
 table.schedule tfoot .sticky-col{z-index:4}
 table.schedule tfoot tr.sum-ch td{background:#fef3c7;color:#92400e}
@@ -558,6 +562,8 @@ const state = {
   customHolidays: {},
   removedHolidays: {},
   noNightDouble: {},
+  noNightClash: {},
+  prevNightCarry: {},
   warnings: [],
   selectedShift: null,
   selectedLeave: null,
@@ -592,6 +598,30 @@ const includesBD = s => s === 'BD' || s === 'ชBD' || s === 'ดBD';
 // (ดบ = ดึก+บ่าย, DN = เช้า+ดึก, ดBD = ดึก+BD). Single ด is still allowed.
 const isNightDouble = s => s === 'ดบ' || s === 'DN' || s === 'ดBD';
 const isNightDoubleBlocked = (nid, s) => !!(state.noNightDouble && state.noNightDouble[nid]) && isNightDouble(s);
+// ===== NEW: (1) ห้ามเวรดึกชนกัน — พยาบาลที่ติ๊กไว้ จะขึ้นเวรดึก (ด/ดบ/DN/ดBD) วันเดียวกันพร้อมกันไม่ได้เด็ดขาด
+// ===== NEW: (2) คนที่ขึ้นเวรดึกวันสุดท้ายของเดือนก่อน ห้ามขึ้นเวรใดๆ ในวันที่ 1 ของเดือนถัดไป
+const isNightClashNurse = nid => !!(state.noNightClash && state.noNightClash[nid]);
+const nightClashBlocked = (nid, d, s) => {
+  if (!s || !includesNight(s) || !isNightClashNurse(nid)) return false;
+  return state.nurses.some(o => o.active && o.id !== nid && isNightClashNurse(o.id) && includesNight(getShift(o.id, d)));
+};
+const carryKeyOf = (y, m) => y + '-' + m;
+const isCarryBlocked = nid => { const c = state.prevNightCarry && state.prevNightCarry[carryKeyOf(state.year, state.month)]; return !!(c && c[nid]); };
+const isMonthBoundaryBlocked = (nid, d, s) => d === 1 && isWorking(s) && isCarryBlocked(nid);
+const isHardBlockedNew = (nid, d, s) => nightClashBlocked(nid, d, s) || isMonthBoundaryBlocked(nid, d, s);
+// ข้อความแจ้งเตือนเมื่อลงเวรด้วยมือแล้วผิดกฎใหม่ (คืน null ถ้าไม่ผิด)
+function manualHardBlockMsg(nid, d, s) {
+  const nurse = state.nurses.find(x => x.id === nid);
+  if (!nurse || !s) return null;
+  if (isMonthBoundaryBlocked(nid, d, s)) {
+    return ['กฎห้าม: ขึ้นเวรต่อวันที่ 1', `<b>${nurse.name}</b> ขึ้นเวรดึกวันสุดท้ายของเดือนก่อน<br>จึงห้ามขึ้นเวรในวันที่ 1 ของเดือนนี้ (ลงได้เฉพาะ OFF/วันลา)<br><small>(แก้รายชื่อได้ที่ ตั้งค่าขั้นสูง → เวรดึกวันสุดท้ายของเดือนก่อน)</small>`];
+  }
+  if (nightClashBlocked(nid, d, s)) {
+    const others = state.nurses.filter(o => o.active && o.id !== nid && isNightClashNurse(o.id) && includesNight(getShift(o.id, d))).map(o => o.name);
+    return ['กฎห้าม: เวรดึกชนกัน', `วันที่ <b>${d}</b> มี <b>${others.join(', ')}</b> ขึ้นเวรดึกแล้ว<br><b>${nurse.name}</b> อยู่ในรายชื่อ "ห้ามขึ้นเวรดึกชนกัน"<br><small>(แก้รายชื่อได้ที่ ตั้งค่าขั้นสูง)</small>`];
+  }
+  return null;
+}
 // Compound afternoon: shifts that end at/extend into the standard บ่าย slot (20:00 / 24:00)
 // These BLOCK next-day night shifts (hard rule). ชBD ends at 20:00 just like ชบ does — same rule.
 const isCompoundAfternoon = s => s === 'ชบ' || s === 'ดบ' || s === 'ชBD';
@@ -672,6 +702,8 @@ function persistAll() {
     requirements:state.requirements, otSettings:state.otSettings,
     customHolidays:state.customHolidays, removedHolidays:state.removedHolidays,
     noNightDouble:state.noNightDouble,
+    noNightClash:state.noNightClash,
+    prevNightCarry:state.prevNightCarry,
     savedAt:state.savedAt
   };
   try {
@@ -710,7 +742,9 @@ function loadFromStorage() {
     otSettings: Object.assign({}, DEFAULT_OT, data.otSettings || {}),
     customHolidays: data.customHolidays || {},
     removedHolidays: data.removedHolidays || {},
-    noNightDouble: data.noNightDouble || {}
+    noNightDouble: data.noNightDouble || {},
+    noNightClash: data.noNightClash || {},
+    prevNightCarry: data.prevNightCarry || {}
   });
   // Migration: ensure bd field exists on weekday/weekend requirements
   if (state.requirements.weekday.bd === undefined) state.requirements.weekday.bd = 0;
@@ -797,9 +831,25 @@ function readReqFromUI() {
   state.dirty = true;
 }
 
+// NEW: เก็บรายชื่อคนที่ขึ้นเวรดึกวันสุดท้ายของเดือนที่กำลังจะออกจาก → ใช้ห้ามขึ้นเวรวันที่ 1 ของเดือนถัดไป
+function nightNursesOnLastDay(y, m) {
+  const last = daysInMonth(y, m);
+  return state.nurses.filter(n => n.active && includesNight(getShift(n.id, last))).map(n => n.id);
+}
 function onMonthChange() {
+  const oldY = state.year, oldM = state.month;
+  const prevNights = nightNursesOnLastDay(oldY, oldM);
   state.month = +document.getElementById('selMonth').value;
   state.year = +document.getElementById('selYear').value;
+  // ถ้าเลื่อนไป "เดือนถัดไป" พอดี และเดือนเดิมมีคนขึ้นดึกวันสุดท้าย → บันทึกเป็นข้อห้ามวันที่ 1 ของเดือนใหม่อัตโนมัติ
+  const nextM = oldM === 12 ? 1 : oldM + 1, nextY = oldM === 12 ? oldY + 1 : oldY;
+  if (state.year === nextY && state.month === nextM && prevNights.length) {
+    if (!state.prevNightCarry) state.prevNightCarry = {};
+    const key = carryKeyOf(state.year, state.month);
+    state.prevNightCarry[key] = Object.assign({}, state.prevNightCarry[key] || {});
+    prevNights.forEach(id => { state.prevNightCarry[key][id] = true; });
+    try { showInfo('บันทึกข้อห้ามวันที่ 1', prevNights.length + ' คนที่ขึ้นดึกวันสุดท้ายของเดือนก่อน — ห้ามขึ้นเวรวันที่ 1'); } catch (e) {}
+  }
   state.dirty = true;
   refreshAllViews();
 }
@@ -886,6 +936,8 @@ function renderPolicyPanel() {
       </div>
       <div class="nd-grid">${state.nurses.filter(n => n.active).sort((a,b) => a.order - b.order).map(n => `<label class="nd-item ${state.noNightDouble[n.id]?'on':''}"><input type="checkbox" ${state.noNightDouble[n.id]?'checked':''} onchange="toggleNoNightDouble('${n.id}', this.checked)"><span>${n.name}</span></label>`).join('')}</div>
     </div>
+    ${renderNoNightClashRow()}
+    ${renderCarryNightRow()}
     <div class="policy-row">
       <div class="info">
         <strong>จำกัดชั่วโมงทำงานสูงสุดต่อสัปดาห์</strong>
@@ -919,6 +971,57 @@ function toggleNoNightDouble(nid, checked) {
   renderPolicyPanel();
   const n = state.nurses.find(x => x.id === nid);
   showInfo('ตั้งค่า', (n ? n.name : nid) + (checked ? ' — ห้ามขึ้นเวรดึกซ้อนในวันเดียวกัน' : ' — ยกเลิกข้อห้าม'));
+  persistAll();
+}
+
+// ===== NEW: ห้ามเวรดึกชนกัน (รายคน) =====
+function renderNoNightClashRow() {
+  const list = state.nurses.filter(n => n.active).sort((a,b) => a.order - b.order);
+  const cnt = list.filter(n => state.noNightClash && state.noNightClash[n.id]).length;
+  return `<div class="policy-row" style="display:block">
+      <div class="info">
+        <strong>⛔ ห้ามขึ้นเวรดึกชนกัน (เลือกเป็นรายคน) <span class="nc-chip">${cnt} คน</span></strong>
+        <small>ติ๊กชื่อพยาบาลที่ <b>ห้ามขึ้นเวรดึกซ้อนวันเดียวกัน</b> กับคนอื่นที่ติ๊กไว้ — คนใดคนหนึ่งขึ้นเวรดึก (ด / ดบ / DN / ดBD) แล้ว อีกคนจะขึ้นเวรดึกวันเดียวกันไม่ได้เด็ดขาด<br>บังคับทั้งการจัดเวรอัตโนมัติและการคลิกใส่เวรเอง</small>
+      </div>
+      <div class="nd-grid">${list.map(n => { const on = !!(state.noNightClash && state.noNightClash[n.id]); return `<label class="nd-item ${on?'on':''}"><input type="checkbox" ${on?'checked':''} onchange="toggleNoNightClash('${n.id}', this.checked)"><span>${n.name}</span></label>`; }).join('')}</div>
+    </div>`;
+}
+function toggleNoNightClash(nid, checked) {
+  if (!state.noNightClash) state.noNightClash = {};
+  if (checked) state.noNightClash[nid] = true; else delete state.noNightClash[nid];
+  state.dirty = true;
+  renderPolicyPanel();
+  const n = state.nurses.find(x => x.id === nid);
+  showInfo('ตั้งค่า', (n ? n.name : nid) + (checked ? ' — ห้ามขึ้นเวรดึกชนกับคนอื่นในรายชื่อ' : ' — ยกเลิกข้อห้าม'));
+  try { renderSchedule(); } catch (e) {}
+  persistAll();
+}
+// ===== NEW: ดึกวันสุดท้ายของเดือนก่อน → ห้ามขึ้นเวรวันที่ 1 =====
+function renderCarryNightRow() {
+  const list = state.nurses.filter(n => n.active).sort((a,b) => a.order - b.order);
+  const key = carryKeyOf(state.year, state.month);
+  const cur = (state.prevNightCarry && state.prevNightCarry[key]) || {};
+  const cnt = list.filter(n => cur[n.id]).length;
+  const nextM = state.month === 12 ? 1 : state.month + 1, nextY = state.month === 12 ? state.year + 1 : state.year;
+  const mine = nightNursesOnLastDay(state.year, state.month).map(id => { const n = state.nurses.find(x => x.id === id); return n ? n.name : id; });
+  return `<div class="policy-row" style="display:block">
+      <div class="info">
+        <strong>🌙 ดึกวันสุดท้ายของเดือนก่อน → ห้ามขึ้นเวรวันที่ 1 (${THAI_MONTHS[state.month-1]} ${state.year}) <span class="nc-chip">${cnt} คน</span></strong>
+        <small>คนที่ขึ้นเวรดึกวันสุดท้ายของเดือนก่อน <b>ขึ้นเวรต่อวันที่ 1 ของเดือนนี้ไม่ได้</b> (ลงได้เฉพาะ OFF/วันลา) — เมื่อเปลี่ยนไป "เดือนถัดไป" ระบบจะดึงรายชื่อจากตารางเดือนที่ออกมาให้อัตโนมัติ หรือติ๊กเองได้ที่นี่</small>
+      </div>
+      <div class="nd-grid">${list.map(n => { const on = !!cur[n.id]; return `<label class="nd-item ${on?'on':''}"><input type="checkbox" ${on?'checked':''} onchange="toggleCarryNight('${n.id}', this.checked)"><span>${n.name}</span></label>`; }).join('')}</div>
+      <div class="nc-note">เดือนนี้ (${THAI_MONTHS[state.month-1]}) ขึ้นดึกวันสุดท้ายแล้ว: ${mine.length ? mine.map(x => `<span class="nc-chip">${x}</span>`).join('') : '— ไม่มี —'} ${mine.length ? `→ ห้ามขึ้นเวรวันที่ 1 ${THAI_MONTHS[nextM-1]} ${nextY}` : ''}</div>
+    </div>`;
+}
+function toggleCarryNight(nid, checked) {
+  if (!state.prevNightCarry) state.prevNightCarry = {};
+  const key = carryKeyOf(state.year, state.month);
+  if (!state.prevNightCarry[key]) state.prevNightCarry[key] = {};
+  if (checked) state.prevNightCarry[key][nid] = true; else delete state.prevNightCarry[key][nid];
+  if (!Object.keys(state.prevNightCarry[key]).length) delete state.prevNightCarry[key];
+  state.dirty = true;
+  renderPolicyPanel();
+  try { renderSchedule(); } catch (e) {}
   persistAll();
 }
 
@@ -993,8 +1096,8 @@ function renderSchedule() {
       const shift = getShift(n.id, d) || getLeave(n.id, d);
       const pinned = isPinned(n.id, d);
       const cls = shift ? SHIFT_TYPES[shift].cls : 'cell-empty';
-      const pinCls = pinned ? ' pinned' : '';
-      html += `<td><div class="cell ${cls}${pinCls}" onclick="onCellClick('${n.id}',${d})">${shift||''}</div></td>`;
+      const pinCls = (pinned ? ' pinned' : '') + ((d === 1 && isCarryBlocked(n.id)) ? ' boundary-block' : '');
+      html += `<td><div class="cell ${cls}${pinCls}"${(d === 1 && isCarryBlocked(n.id)) ? ' title="ขึ้นดึกวันสุดท้ายของเดือนก่อน — ห้ามขึ้นเวรวันที่ 1"' : ''} onclick="onCellClick('${n.id}',${d})">${shift||''}</div></td>`;
     }
     const s = computeNurseStats(n.id);
     html += `<td class="stat-col">${s.chTotal}</td><td class="stat-col">${s.baTotal}</td><td class="stat-col">${s.duTotal}</td>`;
@@ -1054,6 +1157,7 @@ function onCellClick(nid, d) {
       clearPin(nid, d);
       showInfo('ปลดล็อก', `${nurse.name} วันที่ ${d}`);
     } else {
+      { const hb = manualHardBlockMsg(nid, d, state.selectedShift); if (hb) return showError(hb[0], hb[1]); }
       setPinned(nid, d, state.selectedShift);
       setShift(nid, d, state.selectedShift);
       showInfo('ล็อก', `${nurse.name} วันที่ ${d} = ${state.selectedShift}`);
@@ -1114,6 +1218,8 @@ function onCellClick(nid, d) {
   if (isNightDoubleBlocked(nid, state.selectedShift)) {
     return showError('กฎห้ามเวรดึกซ้อนในวันเดียวกัน', `<b>${nurse.name}</b> ถูกตั้งค่า "ห้ามขึ้นเวรดึกในวันเดียวกัน"<br>เวร <b>${state.selectedShift}</b> มีเวรดึกซ้อนกับเวรอื่น<br><small>(ยกเลิกการติ๊กได้ใน \"ตั้งค่าขั้นสูง\")</small>`);
   }
+  // NEW: ห้ามเวรดึกชนกัน / ห้ามขึ้นเวรวันที่ 1 หลังดึกวันสุดท้ายของเดือนก่อน
+  { const hb = manualHardBlockMsg(nid, d, state.selectedShift); if (hb) return showError(hb[0], hb[1]); }
   // NEW v2.8: 48-hour/week limit
   if (state.policies.maxHoursPerWeek > 0 && isWorking(state.selectedShift)) {
     const weekKey = getWeekOfDay(state.year, state.month, d);
@@ -1187,7 +1293,7 @@ function refreshRow(nid) {
     const shift = getShift(nid, d) || getLeave(nid, d);
     const pinned = isPinned(nid, d);
     const cls = shift ? SHIFT_TYPES[shift].cls : 'cell-empty';
-    div.className = 'cell ' + cls + (pinned?' pinned':'');
+    div.className = 'cell ' + cls + (pinned?' pinned':'') + ((d === 1 && isCarryBlocked(nid)) ? ' boundary-block' : '');
     div.textContent = shift || '';
   }
   const s = computeNurseStats(nid);
@@ -1284,7 +1390,7 @@ function fillAllEmpty() {
         let fillWith = 'O';
         if (state.policies.banNightAfterOff && d < days) {
           const next = getShift(n.id, d+1);
-          if (includesNight(next)) fillWith = 'ช';
+          if (includesNight(next) && !isMonthBoundaryBlocked(n.id, d, 'ช')) fillWith = 'ช';
         }
         setShift(n.id, d, fillWith);
         filled++;
@@ -1328,6 +1434,7 @@ function packShortages(relaxWeekly) {
     return [...nurses].sort((a, b) => counts.get(a.id) - counts.get(b.id));
   };
   const eligibleNight = (n, d) => {
+    if (isHardBlockedNew(n.id, d, 'ด')) return false;
     const prev = d > 1 ? getShift(n.id, d-1) : null;
     if (isCompoundAfternoon(prev)) return false;
     if (prev === 'บ' && !state.policies.allowAfternoonToNight) return false;
@@ -1369,6 +1476,7 @@ function packShortages(relaxWeekly) {
   };
   // open cell = empty (null) OR O (can be overwritten with a working shift)
   const isOpenCell = (n, d) => {
+    if (isMonthBoundaryBlocked(n.id, d, 'ช')) return false;
     if (isPinned(n.id, d)) return false;
     if (getLeave(n.id, d)) return false;
     const cur = getShift(n.id, d);
@@ -1399,6 +1507,7 @@ function packShortages(relaxWeekly) {
             if (getPosition(n.position).weekdayMorningOnly) continue;
             if (!eligibleNight(n, d) || !eligibleCompoundAft(n, d)) continue;
             if (isNightDoubleBlocked(n.id, 'ดบ')) continue;
+            if (isHardBlockedNew(n.id, d, 'ดบ')) continue;
             if (!fitsWeeklyLimit(n, d, 'ดบ')) continue;
             setShift(n.id, d, 'ดบ'); did = true; filledThisPass++; totalFilled++; break;
           }
@@ -1410,6 +1519,7 @@ function packShortages(relaxWeekly) {
           if (getPosition(n.position).weekdayMorningOnly) continue;
           if (!eligibleNight(n, d)) continue;
           if (isNightDoubleBlocked(n.id, 'DN')) continue;
+          if (isHardBlockedNew(n.id, d, 'DN')) continue;
           if (!fitsWeeklyLimit(n, d, 'DN')) continue;
           setShift(n.id, d, 'DN'); did = true; filledThisPass++; totalFilled++; break;
         }
@@ -1420,6 +1530,7 @@ function packShortages(relaxWeekly) {
           if (!isOpenCell(n, d)) continue;
           if (getPosition(n.position).weekdayMorningOnly) continue;
           if (eligibleNight(n, d)) continue; // already tried these above
+          if (isHardBlockedNew(n.id, d, 'ด')) continue;
           if (!canFreePrevDayO(n, d)) continue;
           if (!fitsWeeklyLimit(n, d, 'ด')) continue;
           // Verify: the only reason eligibleNight failed is O→night
@@ -1481,6 +1592,7 @@ function packShortages(relaxWeekly) {
           if (getShift(n.id, d) !== 'ด') continue;
           if (getPosition(n.position).weekdayMorningOnly) continue;
           if (isNightDoubleBlocked(n.id, 'DN')) continue;
+          if (isHardBlockedNew(n.id, d, 'DN')) continue;
           if (!fitsWeeklyLimit(n, d, 'DN')) continue;
           setShift(n.id, d, 'DN'); did = true; filledThisPass++; totalFilled++; break;
         }
@@ -1531,6 +1643,7 @@ function packShortages(relaxWeekly) {
           if (getShift(n.id, d) !== 'ด') continue;
           if (getPosition(n.position).weekdayMorningOnly) continue;
           if (isNightDoubleBlocked(n.id, 'ดBD')) continue;
+          if (isHardBlockedNew(n.id, d, 'ดBD')) continue;
           setShift(n.id, d, 'ดBD'); did = true; filledThisPass++; totalFilled++; break;
         }
         if (!did) break;
@@ -1579,6 +1692,8 @@ function scoreNurse(n, day, targetShift) {
   if (state.policies.banDoubleSameDay && targetShift === 'ดบ') return Infinity;
   // NEW: per-nurse ban on night-bearing double shifts
   if (isNightDoubleBlocked(n.id, targetShift)) return Infinity;
+  // NEW: ห้ามเวรดึกชนกัน / ห้ามขึ้นเวรวันที่ 1 หลังดึกวันสุดท้ายของเดือนก่อน
+  if (isHardBlockedNew(n.id, day, targetShift)) return Infinity;
   // NEW v2.8: 48-hour/week limit — block if adding this shift would exceed maxHoursPerWeek
   if (state.policies.maxHoursPerWeek > 0) {
     const weekKey = getWeekOfDay(state.year, state.month, day);
@@ -1793,6 +1908,7 @@ function autoScheduleCore() {
             if (getShift(n.id, d) !== 'ด') continue;
             if (getPosition(n.position).weekdayMorningOnly) continue;
             if (isNightDoubleBlocked(n.id, 'ดBD')) continue;
+            if (isHardBlockedNew(n.id, d, 'ดBD')) continue;
             setShift(n.id, d, 'ดBD');
             placed++; upgraded = true; break;
           }
@@ -1887,6 +2003,7 @@ function autoScheduleCore() {
         const dayReq = getDayRequirement(state.year, state.month, d);
         if (countShiftOnDay(d, 'ด') >= dayReq.du) continue;
         if (isNightDoubleBlocked(n.id, 'ดบ')) continue;
+        if (isHardBlockedNew(n.id, d, 'ดบ')) continue;
         setShift(n.id, d, 'ดบ');
         break;
       }
@@ -1965,6 +2082,7 @@ function autoScheduleCore() {
           const prev = sd.d > 1 ? getShift(n.id, sd.d-1) : null;
           if (isCompoundAfternoon(prev)) continue;
           if (prev === 'บ' && !state.policies.allowAfternoonToNight) continue;
+          if (isHardBlockedNew(n.id, sd.d, 'ด')) continue;
           // Note: no O→night check here since cells are still empty (not filled with O yet)
           // Perform swap
           setShift(n.id, ed.d, null);
@@ -1994,6 +2112,7 @@ function autoScheduleCore() {
       if (getPosition(other.position).weekdayMorningOnly) continue;
       if (isPinned(other.id, d)) continue;
       if (isNightDoubleBlocked(other.id, badShift)) continue;
+      if (isHardBlockedNew(other.id, d, badShift)) continue;
       // Check if 'other' is on this day and can swap
       const otherCur = getShift(other.id, d);
       if (otherCur && otherCur !== 'O') continue; // busy
@@ -2116,6 +2235,7 @@ function autoScheduleCore() {
           const eligible = (n, sh) => {
             if (sh === 'O' || !sh) return true;
             if (isNightDoubleBlocked(n.id, sh)) return false;
+            if (isHardBlockedNew(n.id, d, sh)) return false;
             const prev = d > 1 ? getShift(n.id, d-1) : null;
             if (includesNight(sh)) {
               if (isCompoundAfternoon(prev)) return false;
@@ -2196,6 +2316,7 @@ function autoScheduleCore() {
             const eligible = (n, sh) => {
               if (sh === 'O' || !sh) return true;
               if (isNightDoubleBlocked(n.id, sh)) return false;
+              if (isHardBlockedNew(n.id, d, sh)) return false;
               const prev = d > 1 ? getShift(n.id, d-1) : null;
               if (includesNight(sh)) {
                 if (isCompoundAfternoon(prev)) return false;
@@ -2335,6 +2456,69 @@ function autoScheduleCore() {
   }
   if (demoted > 0) warnings.push(`🌴 ปรับ ${demoted} เซลล์ (ลดเวรเกิน)`);
   
+  // STEP 5.9 (NEW): บังคับกฎเด็ดขาด — (1) เวรดึกชนกัน (2) ห้ามขึ้นเวรวันที่ 1 หลังดึกวันสุดท้ายของเดือนก่อน
+  // ขั้นตอนนี้เป็น safety-net: แก้เฉพาะจุดที่ยังผิดกฎ (ไม่แตะเซลล์ที่ล็อก 🔒) โดยพยายามย้ายเวรให้คนอื่นที่ทำได้ก่อน
+  {
+    const stripNight = (sh, nextHasNight) => sh === 'ด' ? ((nextHasNight && state.policies.banNightAfterOff) ? 'ช' : 'O') : sh === 'DN' ? 'ช' : sh === 'ดบ' ? 'บ' : sh === 'ดBD' ? 'BD' : sh;
+    const reassignHard = (d, sh, exceptId) => {
+      for (const o of activeNurses) {
+        if (o.id === exceptId) continue;
+        if (getPosition(o.position).weekdayMorningOnly) continue;
+        if (isPinned(o.id, d) || getLeave(o.id, d)) continue;
+        const oc = getShift(o.id, d);
+        if (oc && oc !== 'O') continue;
+        if (scoreNurse(o, d, sh) === Infinity) continue;
+        const nx = d < days ? getShift(o.id, d+1) : null;
+        if (includesNight(nx) && (isCompoundAfternoon(sh) || (includesAfternoon(sh) && !state.policies.allowAfternoonToNight))) continue;
+        setShift(o.id, d, sh);
+        return true;
+      }
+      return false;
+    };
+    let hardFixed = 0;
+    // (2) วันที่ 1: คนที่ขึ้นดึกวันสุดท้ายของเดือนก่อน
+    activeNurses.forEach(n => {
+      if (!isCarryBlocked(n.id)) return;
+      const c1 = getShift(n.id, 1);
+      if (!isWorking(c1) || isPinned(n.id, 1) || getLeave(n.id, 1)) return;
+      reassignHard(1, c1, n.id);
+      setShift(n.id, 1, 'O');
+      hardFixed++;
+      // วันที่ 2 ห้ามเป็นเวรดึกต่อจาก O (กฎ O→ด) — ย้าย/ลดเวรดึกวันที่ 2
+      const c2 = days >= 2 ? getShift(n.id, 2) : null;
+      if (state.policies.banNightAfterOff && includesNight(c2) && !isPinned(n.id, 2)) {
+        reassignHard(2, c2, n.id);
+        const nx = days >= 3 ? getShift(n.id, 3) : null;
+        setShift(n.id, 2, stripNight(c2, includesNight(nx)));
+        hardFixed++;
+      }
+    });
+    // (1) เวรดึกชนกัน
+    for (let d = 1; d <= days; d++) {
+      let guard = 0;
+      while (guard++ < 20) {
+        const flagged = activeNurses.filter(n => isNightClashNurse(n.id) && includesNight(getShift(n.id, d)));
+        if (flagged.length < 2) break;
+        const victim = [...flagged].reverse().find(n => !isPinned(n.id, d));
+        if (!victim) break; // ล็อกทั้งหมด — ปล่อยให้แจ้งเตือนด้านล่าง
+        const vs = getShift(victim.id, d);
+        const nx = d < days ? getShift(victim.id, d+1) : null;
+        setShift(victim.id, d, stripNight(vs, includesNight(nx)));
+        reassignHard(d, vs, victim.id);
+        hardFixed++;
+      }
+    }
+    if (hardFixed > 0) warnings.push(`🛡 บังคับกฎเด็ดขาด (ดึกชนกัน/วันที่ 1 หลังดึกสิ้นเดือน): ปรับ ${hardFixed} เซลล์`);
+    // รายงานส่วนที่ยังผิดกฎ (เช่น เซลล์ที่ล็อกไว้)
+    activeNurses.forEach(n => {
+      if (isCarryBlocked(n.id) && isWorking(getShift(n.id, 1))) warnings.push(`⚠ ${n.name} วันที่ 1: ${getShift(n.id, 1)} (ขึ้นดึกวันสุดท้ายของเดือนก่อน — ห้ามขึ้นเวร)`);
+    });
+    for (let d = 1; d <= days; d++) {
+      const f = activeNurses.filter(n => isNightClashNurse(n.id) && includesNight(getShift(n.id, d)));
+      if (f.length >= 2) warnings.push(`⚠ วันที่ ${d}: เวรดึกชนกัน (${f.map(n => n.name).join(', ')})`);
+    }
+  }
+
   // STEP 6: Validation pass (reporting only)
   activeNurses.forEach(n => {
     for (let d=1; d<days; d++) {
@@ -3454,6 +3638,8 @@ async function clearAll() {
   state.customHolidays = {};
   state.removedHolidays = {};
   state.noNightDouble = {};
+  state.noNightClash = {};
+  state.prevNightCarry = {};
   state.warnings = [];
   state.nurses = JSON.parse(JSON.stringify(DEFAULT_NURSES));
   state.requirements = JSON.parse(JSON.stringify(DEFAULT_REQ));
