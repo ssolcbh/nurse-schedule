@@ -541,7 +541,11 @@ const DEFAULT_REQ = {
   holiday:{ch:2,ba:2,du:2,bd:0}
 };
 const DEFAULT_OT = {threshold:18,rates:{'ช':700,'บ':360,'ด':360,'ชบ':1060,'ดบ':720,'BD':360,'DN':1060}};
-const DEFAULT_POLICIES = {allowAfternoonToNight:false,banNightAfterOff:true,banDoubleSameDay:true,maxHoursPerWeek:48};
+const DEFAULT_POLICIES = {allowAfternoonToNight:false,banNightAfterOff:true,banDoubleSameDay:true,maxHoursPerWeek:48,
+  banNightThenAfternoon:true,   // ห้าม ด → บ (ดึกแล้วขึ้นบ่ายวันถัดไป)
+  banNightThenMorning:true,     // ห้าม ด → ช (ดึกแล้วขึ้นเช้าวันถัดไป)
+  maxConsecutiveUnits:10,       // เวรติดกันได้ไม่เกิน N เวร (ช=1, ชบ=2) แล้วต้องหยุด 1 วัน (0 = ปิด)
+  maxConsecutiveChoBa:2};       // ชบ ติดกันได้ไม่เกิน N วัน (0 = ปิด)
 const STORAGE_KEY = 'smnc_nurse_schedule_v28';
 const LEGACY_KEY = 'smnc_nurse_schedule_v271';
 
@@ -609,7 +613,42 @@ const carryKeyOf = (y, m) => y + '-' + m;
 const isCarryBlocked = nid => { const c = state.prevNightCarry && state.prevNightCarry[carryKeyOf(state.year, state.month)]; return !!(c && c[nid]); };
 const isMonthBoundaryBlocked = (nid, d, s) => d === 1 && isWorking(s) && isCarryBlocked(nid);
 // กฎเด็ดขาดรวม: เวรดึกชนกัน หรือ ห้ามขึ้นเวรวันที่ 1 (ใช้ในตัวจัดเวรอัตโนมัติทุกจุด)
-const isHardBlocked = (nid, d, s) => nightClashBlocked(nid, d, s) || isMonthBoundaryBlocked(nid, d, s);
+// ===== กฎลำดับเวร: ด→บ, ด→ช, เวรติดกันไม่เกิน N เวร, ชบ ติดกันไม่เกิน M วัน =====
+// นับ "เวร": ช/บ/ด/BD = 1 เวร, เวรประกอบ (ชบ/ดบ/DN/ชBD/ดBD) = 2 เวร, วัน O/วันลา = วันหยุด (ตัดการนับติดกัน)
+const shiftUnits = s => !isWorking(s) ? 0 : (s === 'ชบ' || s === 'ดบ' || s === 'DN' || s === 'ชBD' || s === 'ดBD') ? 2 : 1;
+// ตรวจว่าการวางเวร s ให้พยาบาล nid วันที่ d ผิดกฎลำดับเวรหรือไม่ — คืนรหัสกฎที่ผิด หรือ null
+// mode 'prev' = ดูเฉพาะวันก่อนหน้า (ใช้ตอนสแกนทั้งตารางเพื่อรายงาน/แก้ ไม่ให้รายงานซ้ำ), ปกติดูทั้งสองด้าน
+function seqRuleViolation(nid, d, s, mode) {
+  if (!isWorking(s)) return null;
+  const P = state.policies, days = monthDays(), both = mode !== 'prev';
+  const prev = d > 1 ? getShift(nid, d - 1) : null;
+  const next = (both && d < days) ? getShift(nid, d + 1) : null;
+  if (P.banNightThenAfternoon && ((includesNight(prev) && includesAfternoon(s)) || (includesNight(s) && includesAfternoon(next)))) return 'nightAfternoon';
+  if (P.banNightThenMorning && ((includesNight(prev) && includesMorning(s)) || (includesNight(s) && includesMorning(next)))) return 'nightMorning';
+  const maxU = +P.maxConsecutiveUnits || 0;
+  if (maxU > 0) {
+    let total = shiftUnits(s);
+    for (let i = d - 1; i >= 1 && isWorking(getShift(nid, i)); i--) total += shiftUnits(getShift(nid, i));
+    if (both) for (let i = d + 1; i <= days && isWorking(getShift(nid, i)); i++) total += shiftUnits(getShift(nid, i));
+    if (total > maxU) return 'maxUnits';
+  }
+  const maxC = +P.maxConsecutiveChoBa || 0;
+  if (maxC > 0 && s === 'ชบ') {
+    let run = 1;
+    for (let i = d - 1; i >= 1 && getShift(nid, i) === 'ชบ'; i--) run++;
+    if (both) for (let i = d + 1; i <= days && getShift(nid, i) === 'ชบ'; i++) run++;
+    if (run > maxC) return 'chobaRun';
+  }
+  return null;
+}
+const SEQ_RULE_TEXT = {
+  nightAfternoon: () => 'ห้าม ด (ดึก) ต่อ บ (บ่าย) — เวรดึกแล้ว วันถัดไปขึ้นบ่ายไม่ได้',
+  nightMorning: () => 'ห้าม ด (ดึก) ต่อ ช (เช้า) — เวรดึกแล้ว วันถัดไปขึ้นเช้าไม่ได้',
+  maxUnits: () => `เวรติดกันครบ ${state.policies.maxConsecutiveUnits} เวร (ช=1, ชบ=2) ต้องมีวันหยุด 1 วัน`,
+  chobaRun: () => `ชบ (เช้า+บ่าย) ติดกันได้ไม่เกิน ${state.policies.maxConsecutiveChoBa} วัน`
+};
+// กฎเด็ดขาดรวม: เวรดึกชนกัน / ห้ามขึ้นเวรวันที่ 1 / กฎลำดับเวร (ใช้ในตัวจัดเวรอัตโนมัติทุกจุด)
+const isHardBlocked = (nid, d, s) => nightClashBlocked(nid, d, s) || isMonthBoundaryBlocked(nid, d, s) || !!seqRuleViolation(nid, d, s);
 // ข้อความแจ้งเตือนเมื่อลงเวรด้วยมือแล้วผิดกฎ (คืน null ถ้าไม่ผิด)
 function manualHardBlockMsg(nid, d, s) {
   const nurse = state.nurses.find(x => x.id === nid);
@@ -621,6 +660,8 @@ function manualHardBlockMsg(nid, d, s) {
     const others = state.nurses.filter(o => o.active && o.id !== nid && isNightClashNurse(o.id) && includesNight(getShift(o.id, d))).map(o => o.name);
     return ['กฎห้าม: เวรดึกชนกัน', `วันที่ <b>${d}</b> มี <b>${others.join(', ')}</b> ขึ้นเวรดึกแล้ว<br><b>${nurse.name}</b> อยู่ในรายชื่อ "ห้ามขึ้นเวรดึกชนกัน"<br><small>(แก้รายชื่อได้ที่ ตั้งค่าขั้นสูง → ห้ามขึ้นเวรดึกในวันเดียวกัน)</small>`];
   }
+  const seq = seqRuleViolation(nid, d, s);
+  if (seq) return ['กฎห้ามลำดับเวร', `<b>${nurse.name}</b> วันที่ ${d}: ${SEQ_RULE_TEXT[seq]()}<br><small>(ปิด/ปรับได้ใน \"ตั้งค่าขั้นสูง\")</small>`];
   return null;
 }
 // Compound afternoon: shifts that end at/extend into the standard บ่าย slot (20:00 / 24:00)
@@ -953,6 +994,7 @@ function renderPolicyPanel() {
     </div>
     ${renderNoNightClashRow()}
     ${renderCarryNightRow()}
+    ${renderSeqPolicyRows()}
     <div class="policy-row">
       <div class="info">
         <strong>จำกัดชั่วโมงทำงานสูงสุดต่อสัปดาห์</strong>
@@ -1040,6 +1082,42 @@ function toggleNoNightClash(nid, checked) {
   persistAll();
 }
 
+
+// ===== กฎลำดับเวร (ตั้งค่า) =====
+function renderSeqPolicyRows() {
+  const P = state.policies;
+  const inputStyle = 'width:62px;padding:6px 8px;border:1.5px solid #cbd5e1;border-radius:6px;font-weight:700;text-align:center;';
+  const numRow = (key, title, desc, unit, max) => `<div class="policy-row">
+      <div class="info"><strong>${title}</strong><small>${desc}</small></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="number" value="${P[key]}" min="0" max="${max}" step="1" style="${inputStyle}" onchange="updateNumPolicy('${key}', this.value, ${max})">
+        <span style="font-size:.85rem;color:#475569">${unit}</span>
+      </div>
+    </div>`;
+  const tglRow = (key, title, desc) => `<div class="policy-row">
+      <div class="info"><strong>${title}</strong><small>${desc}</small></div>
+      <div class="toggle red-on ${P[key]?'on':''}" onclick="togglePolicy('${key}')"></div>
+    </div>`;
+  return numRow('maxConsecutiveUnits', '🔁 เวรติดกันครบกี่เวร ต้องหยุด 1 วัน',
+      'นับเป็น "เวร": <b>ช / บ / ด = 1 เวร</b>, <b>ชบ / ดบ / DN = 2 เวร</b> — เมื่อทำงานติดกันครบตามจำนวนนี้ วันถัดไปต้องเป็น OFF/วันลา (ใส่ 0 = ปิดกฎ)', 'เวร', 31)
+    + tglRow('banNightThenAfternoon', '🚫 ห้าม ด (ดึก) ต่อ บ (บ่าย)', 'ขึ้นเวรดึกแล้ว วันถัดไปห้ามขึ้นเวรที่มีบ่าย (บ / ชบ / ดบ)')
+    + tglRow('banNightThenMorning', '🚫 ห้าม ด (ดึก) ต่อ ช (เช้า)', 'ขึ้นเวรดึกแล้ว วันถัดไปห้ามขึ้นเวรที่มีเช้า (ช / ชบ / DN / ชBD)')
+    + numRow('maxConsecutiveChoBa', '🔁 ชบ (เช้า+บ่าย) ติดกันได้ไม่เกินกี่วัน',
+      'เช่น ใส่ 2 = ชบ ติดกัน 2 วันได้ วันที่ 3 ห้ามเป็น ชบ (ใส่ 0 = ปิดกฎ)', 'วัน', 31);
+}
+function updateNumPolicy(key, val, max) {
+  const n = parseInt(val, 10);
+  if (isNaN(n) || n < 0 || n > max) {
+    showWarn('ค่าไม่ถูกต้อง', `ใส่ค่าระหว่าง 0-${max} (0 = ปิดกฎนี้)`);
+    renderPolicyPanel();
+    return;
+  }
+  state.policies[key] = n;
+  state.dirty = true;
+  renderPolicyPanel();
+  showInfo('ตั้งค่า', key + ' = ' + (n || 'ปิด'));
+  persistAll();
+}
 
 function togglePolicy(key) {
   state.policies[key] = !state.policies[key];
@@ -1407,7 +1485,7 @@ function fillAllEmpty() {
         let fillWith = 'O';
         if (state.policies.banNightAfterOff && d < days) {
           const next = getShift(n.id, d+1);
-          if (includesNight(next) && !isMonthBoundaryBlocked(n.id, d, 'ช')) fillWith = 'ช';
+          if (includesNight(next) && !isMonthBoundaryBlocked(n.id, d, 'ช') && !seqRuleViolation(n.id, d, 'ช')) fillWith = 'ช';
         }
         setShift(n.id, d, fillWith);
         filled++;
@@ -1569,6 +1647,7 @@ function packShortages(relaxWeekly) {
           if (getPosition(n.position).weekdayMorningOnly) continue;
           if (!eligibleAfternoon(n, d)) continue;
           if (!fitsWeeklyLimit(n, d, 'บ')) continue;
+          if (isHardBlocked(n.id, d, 'บ')) continue;
           setShift(n.id, d, 'บ'); did = true; filledThisPass++; totalFilled++; break;
         }
         if (did) continue;
@@ -1579,6 +1658,7 @@ function packShortages(relaxWeekly) {
           if (pos.weekdayMorningOnly && (rest || !pos.allowChba)) continue;
           if (!eligibleCompoundAft(n, d)) continue;
           if (!fitsWeeklyLimit(n, d, 'ชบ')) continue;
+          if (isHardBlocked(n.id, d, 'ชบ')) continue;
           setShift(n.id, d, 'ชบ'); did = true; filledThisPass++; totalFilled++; break;
         }
         if (!did) break;
@@ -1591,6 +1671,7 @@ function packShortages(relaxWeekly) {
           if (!isOpenCell(n, d)) continue;
           if (rest && getPosition(n.position).weekdayMorningOnly) continue;
           if (!fitsWeeklyLimit(n, d, 'ช')) continue;
+          if (isHardBlocked(n.id, d, 'ช')) continue;
           setShift(n.id, d, 'ช'); did = true; filledThisPass++; totalFilled++; break;
         }
         if (did) continue;
@@ -1601,6 +1682,7 @@ function packShortages(relaxWeekly) {
           if (pos.weekdayMorningOnly && (rest || !pos.allowChba)) continue;
           if (!eligibleCompoundAft(n, d)) continue;
           if (!fitsWeeklyLimit(n, d, 'ชบ')) continue;
+          if (isHardBlocked(n.id, d, 'ชบ')) continue;
           setShift(n.id, d, 'ชบ'); did = true; filledThisPass++; totalFilled++; break;
         }
         if (did) continue;
@@ -1635,6 +1717,7 @@ function packShortages(relaxWeekly) {
           if (!isOpenCell(n, d)) continue;
           if (getPosition(n.position).weekdayMorningOnly) continue;
           if (!fitsWeeklyLimit(n, d, 'BD')) continue;
+          if (isHardBlocked(n.id, d, 'BD')) continue;
           setShift(n.id, d, 'BD'); did = true; filledThisPass++; totalFilled++; break;
         }
         if (did) continue;
@@ -1650,6 +1733,7 @@ function packShortages(relaxWeekly) {
             const next = getShift(n.id, d+1);
             if (includesNight(next)) continue;
           }
+          if (isHardBlocked(n.id, d, 'ชBD')) continue;
           setShift(n.id, d, 'ชBD'); did = true; filledThisPass++; totalFilled++; break;
         }
         if (did) continue;
@@ -1910,6 +1994,7 @@ function autoScheduleCore() {
               const next = getShift(n.id, d+1);
               if (includesNight(next)) continue;
             }
+            if (isHardBlocked(n.id, d, 'ชBD')) continue;
             setShift(n.id, d, 'ชBD');
             placed++; upgraded = true; break;
           }
@@ -1962,6 +2047,7 @@ function autoScheduleCore() {
       // NEW v2.8: don't upgrade if today's บ่าย is already at/over req (would overflow)
       const dayReq = getDayRequirement(state.year, state.month, d);
       if (countShiftOnDay(d, 'บ') >= dayReq.ba) continue;
+      if (isHardBlocked(n.id, d, 'ชบ')) continue;
       setShift(n.id, d, 'ชบ');
       break;
     }
@@ -1992,6 +2078,7 @@ function autoScheduleCore() {
         }
         if (conflict) continue;
       }
+      if (isHardBlocked(n.id, d, 'ชบ')) continue;
       setShift(n.id, d, 'ชบ');
       break;
     }
@@ -2511,8 +2598,38 @@ function autoScheduleCore() {
         hardFixed++;
       }
     }
-    if (hardFixed > 0) warnings.push(`🛡 บังคับกฎเด็ดขาด (ดึกชนกัน/วันที่ 1 หลังดึกสิ้นเดือน): ปรับ ${hardFixed} เซลล์`);
+    // (3) กฎลำดับเวร: ด→บ, ด→ช, เวรติดกันไม่เกิน N เวร, ชบ ติดกันไม่เกิน M วัน
+    const seqNurses = activeNurses.filter(n => !getPosition(n.position).weekdayMorningOnly);
+    const fixSeqOnce = () => {
+      let fixed = 0;
+      seqNurses.forEach(n => {
+        for (let d = 1; d <= days; d++) {
+          const cur = getShift(n.id, d);
+          if (!isWorking(cur) || isPinned(n.id, d) || getLeave(n.id, d)) continue;
+          const code = seqRuleViolation(n.id, d, cur, 'prev');
+          if (!code) continue;
+          let repl = 'O', handOver = cur;
+          if (code === 'chobaRun') { repl = 'ช'; handOver = 'บ'; }
+          else if (state.policies.banNightAfterOff && d < days && includesNight(getShift(n.id, d + 1)) && !isHardBlocked(n.id, d, 'ด') && !isNightDoubleBlocked(n.id, 'ด')) {
+            repl = 'ด'; // ต่อเวรดึกให้ต่อเนื่อง ไม่ให้เกิด O→ด
+          }
+          if (repl === cur) continue;
+          setShift(n.id, d, repl);
+          reassignHard(d, handOver, n.id); // ส่งส่วนที่ขาดให้คนอื่นที่ทำได้ (ถ้าไม่มีใครรับได้ จะไปแจ้งเตือนอัตรากำลังขาด)
+          fixed++;
+        }
+      });
+      return fixed;
+    };
+    for (let pass = 0; pass < 6; pass++) { const f = fixSeqOnce(); hardFixed += f; if (!f) break; }
+    if (hardFixed > 0) warnings.push(`🛡 บังคับกฎเด็ดขาด (ดึกชนกัน/วันที่ 1/ลำดับเวร): ปรับ ${hardFixed} เซลล์`);
     // รายงานส่วนที่ยังผิดกฎ (เช่น เซลล์ที่ล็อกไว้)
+    seqNurses.forEach(n => {
+      for (let d = 1; d <= days; d++) {
+        const code = seqRuleViolation(n.id, d, getShift(n.id, d), 'prev');
+        if (code) warnings.push(`⚠ ${n.name} วันที่ ${d}: ${SEQ_RULE_TEXT[code]()}`);
+      }
+    });
     activeNurses.forEach(n => {
       if (isCarryBlocked(n.id) && isWorking(getShift(n.id, 1))) warnings.push(`⚠ ${n.name} วันที่ 1: ${getShift(n.id, 1)} (ขึ้นดึกวันสุดท้ายของเดือนก่อน — ห้ามขึ้นเวร)`);
     });
