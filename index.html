@@ -946,7 +946,7 @@ function renderPolicyPanel() {
     </div>
     <div class="policy-row" style="display:block">
       <div class="info">
-        <strong>🚫 ห้ามขึ้นเวรดึกในวันเดียวกัน (เลือกเฉพาะรายชื่อ)</strong>
+        <strong>🚫 ห้ามขึ้นเวรซ้อนที่มี ด ระบบจะไม่ให้ได้ ดบ, DN หรือ ดBD (เลือกเฉพาะรายชื่อ)</strong>
         <small>ติ๊กชื่อพยาบาลที่ <b>ห้ามขึ้นเวรซ้อนที่มีดึก</b> ในวันเดียวกัน = <b>ดบ / DN / ดBD</b> (เวร ด เดี่ยวยังจัดได้ตามปกติ)<br>Algorithm และการคลิกใส่เวรเองจะไม่อนุญาตเวรซ้อนเหล่านี้ให้คนที่ติ๊กไว้</small>
       </div>
       <div class="nd-grid">${getActiveNurses().sort((a,b) => a.order - b.order).map(n => `<label class="nd-item ${state.noNightDouble[n.id]?'on':''}"><input type="checkbox" ${state.noNightDouble[n.id]?'checked':''} onchange="toggleNoNightDouble('${n.id}', this.checked)"><span>${n.name}</span></label>`).join('')}</div>
@@ -995,7 +995,7 @@ function renderNoNightClashRow() {
   const cnt = list.filter(n => state.noNightClash && state.noNightClash[n.id]).length;
   return `<div class="policy-row" style="display:block">
       <div class="info">
-        <strong>⛔ ห้ามขึ้นเวรดึกในวันเดียวกัน (ติ๊กเลือกรายชื่อ — ห้ามชนกัน) <span class="nc-chip">${cnt} คน</span></strong>
+        <strong>⛔ ห้ามขึ้นดึกพร้อมกัน (ติ๊กเลือกรายชื่อ — ห้ามชนกัน) <span class="nc-chip">${cnt} คน</span></strong>
         <small>ติ๊กชื่อพยาบาลที่ <b>ห้ามขึ้นเวรดึกซ้อนวันเดียวกัน</b> กับคนอื่นที่ติ๊กไว้ — คนใดคนหนึ่งขึ้นเวรดึก (ด / ดบ / DN / ดBD) แล้ว อีกคนจะขึ้นเวรดึกวันเดียวกันไม่ได้เด็ดขาด<br>บังคับทั้งการจัดเวรอัตโนมัติและการคลิกใส่เวรเอง</small>
       </div>
       <div class="nd-grid">${list.map(n => { const on = !!(state.noNightClash && state.noNightClash[n.id]); return `<label class="nd-item ${on?'on':''}"><input type="checkbox" ${on?'checked':''} onchange="toggleNoNightClash('${n.id}', this.checked)"><span>${n.name}</span></label>`; }).join('')}</div>
