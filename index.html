@@ -291,12 +291,15 @@ table.schedule td.stat-col[style*="0891b2"]{background:var(--brand)!important;co
   .main{padding:0}
   .card,.schedule-wrapper{box-shadow:none}
   .schedule-wrapper{max-height:none;overflow:visible}
+  .print-sig{display:block!important}
 }
 /* ===== NEW: per-nurse night-double ban + daily totals ===== */
 .nd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 12px;margin-top:8px}
 .nd-item{display:flex;align-items:center;gap:7px;font-size:.8rem;color:var(--ink);cursor:pointer;padding:4px 8px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface-2)}
 .nd-item.on{background:#fee2e2;border-color:#fca5a5;color:#991b1b;font-weight:700}
 .nd-item input{width:16px;height:16px;accent-color:#dc2626;cursor:pointer}
+/* ช่องลงชื่อสำหรับหน้าพิมพ์ — ซ่อนบนหน้าจอ แสดงเฉพาะตอนพิมพ์ */
+.print-sig{display:none}
 /* NEW: ห้ามขึ้นเวรดึกในวันเดียวกัน (ห้ามชนกัน) */
 .cell.boundary-block{outline:2px dashed #dc2626;outline-offset:-2px}
 .nc-note{font-size:.76rem;color:var(--ink-3);margin-top:6px}
@@ -444,6 +447,7 @@ table.schedule tfoot td.sum-low{color:#dc2626}
     </details>
     <div class="shift-palette" id="shiftPalette"></div>
     <div class="schedule-wrapper"><table class="schedule" id="scheduleTable"></table></div>
+    <div class="print-sig"></div>
   </section>
   <section id="tab-leaves" class="tab-panel">
     <div class="shift-palette" id="leavePalette"></div>
@@ -460,6 +464,7 @@ table.schedule tfoot td.sum-low{color:#dc2626}
       <button class="btn-pdf" onclick="exportOT('pdf')"><svg class="ic"><use href="#i-file"/></svg> ส่งออก PDF</button>
     </div>
     <div class="schedule-wrapper" style="max-height:60vh"><table class="schedule" id="otTable"></table></div>
+    <div class="print-sig"></div>
   </section>
   <section id="tab-nurses" class="tab-panel"><div class="card" style="padding:0"><div id="nursesList"></div></div></section>
   <section id="tab-help" class="tab-panel"><div class="help-grid" id="helpGrid"></div></section>
@@ -3270,23 +3275,45 @@ function exportSchedule(format) {
   else exportSchedulePDF();
 }
 
+// ===== ช่องลงชื่อท้ายเอกสาร: ใช้ชุดเดียวกันทั้ง Excel / PDF / หน้าพิมพ์ (ซ้าย-ขวา 2 ช่อง) =====
+const SIGNATURE_LABELS = ['ผู้จัดตารางเวร', 'ผู้อำนวยการโรงพยาบาล'];
+const SIGNATURE_TEXT = {
+  sign: '(ลงชื่อ) ........................................',
+  name: '(........................................)',
+  date: 'วันที่ ........ / ........ / ............'
+};
+// HTML ช่องลงชื่อ (ใช้กับ PDF และหน้าพิมพ์) — 4 บรรทัดเหมือน Excel: ลงชื่อ / (ชื่อ) / ตำแหน่ง / วันที่
+function signatureBlockHtml(fontPx, marginTopPx) {
+  const box = label => `<div style="text-align:center">
+      <div>${SIGNATURE_TEXT.sign}</div>
+      <div style="margin-top:4px">${SIGNATURE_TEXT.name}</div>
+      <div style="margin-top:6px;font-weight:600">${label}</div>
+      <div style="margin-top:6px;font-size:${Math.max(10, fontPx - 2)}px;color:#475569">${SIGNATURE_TEXT.date}</div>
+    </div>`;
+  return `<div style="margin-top:${marginTopPx}px;display:flex;justify-content:space-between;font-size:${fontPx}px;padding:0 8%">${SIGNATURE_LABELS.map(box).join('')}</div>`;
+}
+// ช่องลงชื่อสำหรับหน้าพิมพ์ (window.print / Ctrl+P) — เติมให้ทุกตำแหน่งที่มี .print-sig
+function fillPrintSignatures() {
+  document.querySelectorAll('.print-sig').forEach(el => { el.innerHTML = signatureBlockHtml(13, 36); });
+}
+window.addEventListener('beforeprint', fillPrintSignatures);
+
 // Helper: signature footer rows for any export
 function buildSignatureRows(totalCols) {
   const r1 = new Array(totalCols).fill('');
   const r2 = new Array(totalCols).fill('');
   const r3 = new Array(totalCols).fill('');
   const r4 = new Array(totalCols).fill('');
+  // ลายเซ็น 2 ช่อง: ซ้าย (ผู้จัดตารางเวร) และ ขวา (ผู้อำนวยการโรงพยาบาล)
   const cols = [
     Math.max(1, Math.floor(totalCols * 0.08)),
-    Math.floor(totalCols * 0.45),
     Math.min(totalCols-1, Math.floor(totalCols * 0.80))
   ];
-  const labels = ['ผู้จัดตารางเวร', 'หัวหน้าหอผู้ป่วย', 'ผู้อำนวยการโรงพยาบาล'];
   cols.forEach((col, i) => {
-    r1[col] = '(ลงชื่อ) ........................................';
-    r2[col] = '(........................................)';
-    r3[col] = labels[i];
-    r4[col] = 'วันที่ ........ / ........ / ............';
+    r1[col] = SIGNATURE_TEXT.sign;
+    r2[col] = SIGNATURE_TEXT.name;
+    r3[col] = SIGNATURE_LABELS[i];
+    r4[col] = SIGNATURE_TEXT.date;
   });
   return [r1, r2, r3, r4];
 }
@@ -3491,29 +3518,7 @@ async function exportSchedulePDF() {
       <div style="text-align:center;font-size:16px;font-weight:600;margin:6px 0 3px">ประจำเดือน ${monthYear}</div>
       <div style="text-align:center;font-size:11px;color:#475569;margin-bottom:14px">อัตรากำลัง • ธรรมดา ช=${r.weekday.ch}/บ=${r.weekday.ba}/ด=${r.weekday.du}${r.weekday.bd?'/BD='+r.weekday.bd:''} • เสาร์ ช=${r.saturday.ch}/บ=${r.saturday.ba}/ด=${r.saturday.du}${r.saturday.bd?'/BD='+r.saturday.bd:''} • อาทิตย์ ช=${r.sunday.ch}/บ=${r.sunday.ba}/ด=${r.sunday.du}${r.sunday.bd?'/BD='+r.sunday.bd:''} • หยุดราชการ ช=${r.holiday.ch}/บ=${r.holiday.ba}/ด=${r.holiday.du}${r.holiday.bd?'/BD='+r.holiday.bd:''}</div>
       <div id="pdfTableSlot"></div>
-      <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:13px;gap:30px;padding:0 30px">
-        <div style="text-align:center;flex:1">
-          <div style="margin-bottom:24px">&nbsp;</div>
-          <div>(ลงชื่อ) ........................................................ผู้ควบคุม</div>
-          <div style="margin-top:4px">( นางสาวกนกวรรณ วงษ์ชัยสมร )</div>
-          <div style="margin-top:6px;font-weight:600">พยาบาลวิชาชีพชำนาญการพิเศษ</div>
-          <div style="margin-top:6px;font-size:12px;color:#475569">หัวหน้างานการพยาบาลผู้ป่วยอุบัติเหตุฉุกเฉินและนิติเวช</div>
-        </div>
-        <div style="text-align:center;flex:1">
-          <div style="margin-bottom:24px">&nbsp;</div>
-          <!--<div>(ลงชื่อ) ........................................................ผู้รับรอง</div>-->
-          <!--<div style="margin-top:4px">( นางขนบเนตร แสงประสิทธิ์ )</div>-->
-          <!--<div style="margin-top:6px;font-weight:600">พยาบาลวิชาชีพชำนาญการพิเศษ</div>-->
-          <!--<div style="margin-top:6px;font-size:12px;color:#475569">หัวหน้าพยาบาลโรงพยาบาลแหลมฉบัง</div>-->
-        </div>
-        <div style="text-align:center;flex:1">
-          <div style="margin-bottom:24px">&nbsp;</div>
-          <div>(ลงชื่อ) ........................................................ผู้รับรอง</div>
-          <div style="margin-top:4px">( นางขนบเนตร แสงประสิทธิ์ )</div>
-          <div style="margin-top:6px;font-weight:600">พยาบาลวิชาชีพชำนาญการพิเศษ</div>
-          <div style="margin-top:6px;font-size:12px;color:#475569">หัวหน้าพยาบาลโรงพยาบาลแหลมฉบัง</div>
-        </div>
-      </div>
+      ${signatureBlockHtml(13, 40)}
     `;
     // Clone the schedule wrapper
     const clone = wrap.cloneNode(true);
@@ -3662,29 +3667,7 @@ async function exportOTPDF() {
           <td style="text-align:right;padding:6px 10px;border:1px solid #cbd5e1;color:#b91c1c">${ta.toLocaleString()}</td>
         </tr></tbody>
       </table>
-      <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:13px;gap:20px;padding:0 20px">
-        <div style="text-align:center;flex:1">
-          <div style="margin-bottom:24px">&nbsp;</div>
-          <div>(ลงชื่อ) ......................................................</div>
-          <div style="margin-top:4px">( ...................................................... )</div>
-          <div style="margin-top:6px;font-weight:600">ผู้จัดตารางเวร</div>
-          <div style="margin-top:6px;font-size:11px;color:#475569">วันที่ ........ / ........ / ............</div>
-        </div>
-        <div style="text-align:center;flex:1">
-          <div style="margin-bottom:24px">&nbsp;</div>
-          <div>(ลงชื่อ) ......................................................</div>
-          <div style="margin-top:4px">( ...................................................... )</div>
-          <div style="margin-top:6px;font-weight:600">หัวหน้าหอผู้ป่วย</div>
-          <div style="margin-top:6px;font-size:11px;color:#475569">วันที่ ........ / ........ / ............</div>
-        </div>
-        <div style="text-align:center;flex:1">
-          <div style="margin-bottom:24px">&nbsp;</div>
-          <div>(ลงชื่อ) ......................................................</div>
-          <div style="margin-top:4px">( ...................................................... )</div>
-          <div style="margin-top:6px;font-weight:600">ผู้อำนวยการโรงพยาบาล</div>
-          <div style="margin-top:6px;font-size:11px;color:#475569">วันที่ ........ / ........ / ............</div>
-        </div>
-      </div>
+      ${signatureBlockHtml(13, 40)}
     `;
     document.body.appendChild(container);
     const canvas = await html2canvas(container, {scale:1.5, backgroundColor:'#fff'});
