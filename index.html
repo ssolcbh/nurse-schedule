@@ -90,7 +90,7 @@ sup{line-height:0}
 .label-afternoon{background:#bae6fd;color:#075985}
 .label-night{background:#a5f3fc;color:#155e75}
 .label-bd{background:#fecdd3;color:#9f1239}
-.sh-actions{flex:1 1 100%;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line-2);padding-top:12px}
+.sh-actions{flex:1 1 100%;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line-2);padding-top:12px}
 .sh-actions-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
 /* ---------- Buttons ---------- */
@@ -415,10 +415,6 @@ table.schedule tfoot td.sum-low{color:#dc2626}
     </div>
   </div>
   <div class="sh-actions">
-    <div class="sh-actions-group">
-      <button class="btn-pin" onclick="openBulkPinDialog()"><svg class="ic"><use href="#i-lock"/></svg> ล็อก จ/พ/ศ = เช้า</button>
-      <button class="btn-pin" onclick="openLockHeadsDialog()" title="ล็อกหัวหน้า/รองหัวหน้า ขึ้นเวรเช้าทุกวัน (เปลี่ยนได้ในบาง รพ.)"><svg class="ic"><use href="#i-star"/></svg> ล็อกหัวหน้า = ช ทุกวัน</button>
-    </div>
     <div class="sh-actions-group">
       <button class="btn-red" onclick="clearScheduleOnly()" title="ล้างเฉพาะเวรที่จัดไว้ในตาราง (คงวันลา ล็อก พยาบาล และการตั้งค่าไว้) เพื่อกดจัดเวรอัตโนมัติใหม่"><svg class="ic"><use href="#i-trash"/></svg> ล้างตารางเวร</button>
       <button class="btn-red" onclick="clearAll()"><svg class="ic"><use href="#i-trash"/></svg> ล้างทั้งหมด</button>
@@ -1005,6 +1001,7 @@ function renderPolicyPanel() {
       </div>
       <div class="nd-grid">${getActiveNurses().sort((a,b) => a.order - b.order).map(n => `<label class="nd-item ${state.noNightDouble[n.id]?'on':''}"><input type="checkbox" ${state.noNightDouble[n.id]?'checked':''} onchange="toggleNoNightDouble('${n.id}', this.checked)"><span>${n.name}</span></label>`).join('')}</div>
     </div>
+    ${renderLockRow()}
     ${renderNoNightClashRow()}
     ${renderCarryNightRow()}
     ${renderSeqPolicyRows()}
@@ -3046,62 +3043,66 @@ function togglePinMode() {
   showInfo(state.pinMode?'เปิดโหมดล็อก':'ปิดโหมดล็อก', state.pinMode?'คลิกเซลล์เพื่อล็อก/ปลดล็อก':'คลิกเซลล์เพื่อใส่เวรปกติ');
 }
 
-async function openBulkPinDialog() {
+// ===== ล็อกเวร (Bulk Pin) — อยู่ใน "ตั้งค่าขั้นสูง" =====
+// เลือกเวร / วันของสัปดาห์ / ช่วงวันที่ / รายชื่อพยาบาล แล้วกด "ล็อก" (ค่าเริ่มต้น = ช ทุก จ/พ/ศ ทั้งเดือน ทุกคน)
+// เซลล์ที่ล็อก 🔒 ระบบจัดเวรอัตโนมัติจะไม่เปลี่ยน — ข้ามวันที่มีวันลา; "ล้างล็อกทั้งหมด" ลบล็อกทุกเซลล์ (คงเวรในตาราง)
+const lockForm = {shift: 'ช', dows: [1, 3, 5], from: 1, to: null, off: {}};   // off = รายชื่อที่ "ไม่ติ๊ก"
+const LOCK_SHIFTS = ['ช', 'บ', 'ด', 'ชบ', 'ดบ', 'O'];
+const DOW_LABELS = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+const lockNurses = () => getActiveNurses().filter(n => !getPosition(n.position).weekdayMorningOnly).sort((a, b) => a.order - b.order);
+function renderLockRow() {
   const days = monthDays();
-  const activeNonHead = state.nurses.filter(n => n.active && !getPosition(n.position).weekdayMorningOnly);
-  const nurseOpts = activeNonHead.map(n => 
-    `<label style="display:flex;align-items:center;gap:6px;padding:3px 0"><input type="checkbox" name="bn" value="${n.id}" checked>${n.name}</label>`
-  ).join('');
-  const shiftOpts = ['ช','บ','ด','ชบ','ดบ','O'].map(t => `<option value="${t}" ${t==='ช'?'selected':''}>${t} - ${SHIFT_TYPES[t].name}</option>`).join('');
-  const dowLabels = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
-  const dowChecks = dowLabels.map((l,i) => `<label style="display:inline-block;padding:3px 6px"><input type="checkbox" name="bdow" value="${i}" ${[1,3,5].indexOf(i)>=0?'checked':''}> ${l}</label>`).join('');
-  const r = await Swal.fire({
-    title: '🔒 ล็อกเวร (Bulk Pin)',
-    width: 680,
-    html: `<div style="text-align:left;font-size:.85rem">
-      <div style="margin-bottom:8px"><b>1. เวรที่ต้องการล็อก:</b> <select id="bShift" class="swal2-select" style="margin-left:10px">${shiftOpts}</select></div>
-      <div style="margin-bottom:8px"><b>2. วันของสัปดาห์:</b><br>${dowChecks}</div>
-      <div style="margin-bottom:8px"><b>3. ช่วงวันที่:</b> <input type="number" id="bFrom" value="1" min="1" max="${days}" style="width:60px;padding:3px;border:1px solid #ccc;border-radius:4px"> ถึง <input type="number" id="bTo" value="${days}" min="1" max="${days}" style="width:60px;padding:3px;border:1px solid #ccc;border-radius:4px"></div>
-      <div style="margin-bottom:8px"><b>4. พยาบาล:</b><div style="max-height:160px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px;padding:6px;margin-top:4px">${nurseOpts}</div></div>
-    </div>`,
-    showCancelButton: true,
-    showDenyButton: true,
-    denyButtonText: '🗑 ล้างล็อกทั้งหมด',
-    confirmButtonText: '🔒 ล็อก',
-    cancelButtonText: 'ยกเลิก',
-    confirmButtonColor: '#dc2626',
-    denyButtonColor: '#64748b',
-    preConfirm: () => {
-      const nurses = Array.from(document.querySelectorAll('input[name=bn]:checked')).map(c=>c.value);
-      const dows = Array.from(document.querySelectorAll('input[name=bdow]:checked')).map(c=>+c.value);
-      return {
-        nurseIds: nurses,
-        dows: dows,
-        shift: document.getElementById('bShift').value,
-        from: +document.getElementById('bFrom').value,
-        to: +document.getElementById('bTo').value
-      };
-    }
-  });
-  if (r.isDenied) {
-    const c = await confirmAct('ล้างล็อกทั้งหมด?', `ลบล็อกทั้งหมด ${Object.keys(state.pinnedShifts).length} เซลล์`, 'ล้าง');
-    if (c.isConfirmed) {
-      state.pinnedShifts = {};
-      state.dirty = true;
-      refreshAllViews();
-      showSuccess('ล้างเรียบร้อย');
-    }
-    return;
-  }
-  if (!r.isConfirmed) return;
-  const {nurseIds, dows, shift, from, to} = r.value;
+  const list = lockNurses();
+  const sel = list.filter(n => !lockForm.off[n.id]).length;
+  const to = Math.min(lockForm.to || days, days);
+  const inp = 'padding:5px 8px;border:1.5px solid #cbd5e1;border-radius:6px;font-weight:600';
+  const shiftOpts = LOCK_SHIFTS.map(t => `<option value="${t}" ${t === lockForm.shift ? 'selected' : ''}>${t} - ${SHIFT_TYPES[t].name}</option>`).join('');
+  const dowChecks = DOW_LABELS.map((l, i) => `<label style="display:inline-block;padding:3px 8px;cursor:pointer"><input type="checkbox" ${lockForm.dows.indexOf(i) >= 0 ? 'checked' : ''} onchange="lockFormDow(${i}, this.checked)"> ${l}</label>`).join('');
+  return `<div class="policy-row" id="lockRow" style="display:block">
+      <div class="info">
+        <strong>🔒 ล็อกเวร จ/พ/ศ = เช้า (Bulk Pin — เลือกเฉพาะรายชื่อ) <span class="nc-chip" id="lockSelCount">${sel} คน</span></strong>
+        <small>เลือก <b>เวร / วันของสัปดาห์ / ช่วงวันที่ / รายชื่อ</b> แล้วกด "ล็อก" — เซลล์ที่ล็อก 🔒 ระบบจัดเวรอัตโนมัติจะไม่เปลี่ยน (ค่าเริ่มต้น = ช ทุก จันทร์/พุธ/ศุกร์ ทั้งเดือน) • ข้ามวันที่มีวันลา • หัวหน้า/รองหัวหน้าไม่อยู่ในรายการ</small>
+      </div>
+      <div style="margin:8px 0"><b>1. เวรที่ต้องการล็อก:</b> <select style="${inp};margin-left:8px" onchange="lockForm.shift=this.value">${shiftOpts}</select></div>
+      <div style="margin:8px 0"><b>2. วันของสัปดาห์:</b><br>${dowChecks}</div>
+      <div style="margin:8px 0"><b>3. ช่วงวันที่:</b> <input type="number" min="1" max="${days}" value="${lockForm.from}" style="width:64px;${inp}" onchange="lockForm.from=parseInt(this.value,10)||1"> ถึง <input type="number" min="1" max="${days}" value="${to}" style="width:64px;${inp}" onchange="lockForm.to=parseInt(this.value,10)||null"> <small style="color:#64748b">(เดือนนี้มี ${days} วัน)</small></div>
+      <div style="margin:8px 0 6px"><b>4. พยาบาล:</b> <button type="button" class="btn-pin" style="padding:2px 10px;margin-left:8px" onclick="lockFormAll(true)">เลือกทั้งหมด</button> <button type="button" class="btn-pin" style="padding:2px 10px" onclick="lockFormAll(false)">ไม่เลือก</button></div>
+      <div class="nd-grid">${list.map(n => { const on = !lockForm.off[n.id]; return `<label class="nd-item ${on ? 'on' : ''}"><input type="checkbox" ${on ? 'checked' : ''} onchange="lockFormNurse('${n.id}', this.checked, this)"><span>${n.name}</span></label>`; }).join('')}</div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn-auto" onclick="lockFormApply()"><svg class="ic"><use href="#i-lock"/></svg> ล็อก</button>
+        <button type="button" class="btn-red" onclick="lockFormClearAll()"><svg class="ic"><use href="#i-trash"/></svg> ล้างล็อกทั้งหมด</button>
+      </div>
+    </div>`;
+}
+function lockFormDow(i, checked) {
+  const set = new Set(lockForm.dows);
+  if (checked) set.add(i); else set.delete(i);
+  lockForm.dows = [...set].sort((a, b) => a - b);
+}
+function lockFormNurse(id, checked, el) {
+  if (checked) delete lockForm.off[id]; else lockForm.off[id] = true;
+  if (el && el.closest('.nd-item')) el.closest('.nd-item').classList.toggle('on', checked);
+  const c = document.getElementById('lockSelCount');
+  if (c) c.textContent = lockNurses().filter(n => !lockForm.off[n.id]).length + ' คน';
+}
+function lockFormAll(on) {
+  lockNurses().forEach(n => { if (on) delete lockForm.off[n.id]; else lockForm.off[n.id] = true; });
+  renderPolicyPanel();
+}
+function lockFormApply() {
+  const days = monthDays();
+  const nurseIds = lockNurses().filter(n => !lockForm.off[n.id]).map(n => n.id);
   if (!nurseIds.length) return showError('ไม่ได้เลือกพยาบาล');
-  if (!dows.length) return showError('ไม่ได้เลือกวันของสัปดาห์');
-  let count = 0;
+  if (!lockForm.dows.length) return showError('ไม่ได้เลือกวันของสัปดาห์');
+  const from = Math.max(1, lockForm.from || 1), to = Math.min(days, lockForm.to || days);
+  if (from > to) return showError('ช่วงวันที่ไม่ถูกต้อง', `เดือนนี้มี ${days} วัน — "จากวันที่" ต้องไม่เกิน "ถึงวันที่"`);
+  const shift = lockForm.shift;
+  let count = 0, skipped = 0;
   nurseIds.forEach(nid => {
-    for (let d=from; d<=to; d++) {
-      const dow = new Date(state.year-543, state.month-1, d).getDay();
-      if (dows.indexOf(dow) < 0) continue;
+    for (let d = from; d <= to; d++) {
+      const dow = new Date(state.year - 543, state.month - 1, d).getDay();
+      if (lockForm.dows.indexOf(dow) < 0) continue;
+      if (getLeave(nid, d)) { skipped++; continue; }
       setPinned(nid, d, shift);
       setShift(nid, d, shift);
       count++;
@@ -3109,78 +3110,15 @@ async function openBulkPinDialog() {
   });
   state.dirty = true;
   refreshAllViews();
-  showSuccess('ล็อกเรียบร้อย', `${count} เซลล์`);
+  showSuccess('ล็อกเรียบร้อย', `${count} เซลล์` + (skipped ? ` (ข้าม ${skipped} เซลล์ที่เป็นวันลา)` : ''));
 }
-
-// ==================== LOCK HEADS = ช ทุกวัน ====================
-// บาง รพ.หัวหน้า/รองหัวหน้ายังขึ้นเวรเช้าในวันเสาร์-อาทิตย์/นักขัตฤกษ์
-// ปุ่มนี้ pin ช ลงทุกวันสำหรับตำแหน่ง weekdayMorningOnly (หัวหน้า + รองหัวหน้า)
-// User สามารถ unpin cell ใดก็ได้ภายหลัง (สำหรับ รพ.ที่ให้หัวหน้าหยุดวันหยุด)
-async function openLockHeadsDialog() {
-  const days = monthDays();
-  const heads = state.nurses.filter(n => n.active && getPosition(n.position).weekdayMorningOnly);
-  if (!heads.length) {
-    return showWarn('ไม่พบหัวหน้า/รองหัวหน้า', 'ไม่มีพยาบาลที่ตำแหน่งเป็นหัวหน้าหอผู้ป่วยหรือรองหัวหน้าหอผู้ป่วยในรายการ');
-  }
-  const nurseOpts = heads.map(n => {
-    const icon = getPosition(n.position).icon;
-    return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0"><input type="checkbox" name="hn" value="${n.id}" checked> ${icon} ${n.name} <span style="color:#64748b;font-size:.8rem">(${n.position})</span></label>`;
-  }).join('');
-  const r = await Swal.fire({
-    title: '⭐ ล็อกหัวหน้า/รองหัวหน้า = ช ทุกวัน',
-    width: 640,
-    html: `<div style="text-align:left;font-size:.85rem">
-      <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:10px;border-radius:8px;margin-bottom:12px;color:#92400e;font-size:.82rem">
-        💡 <b>ใช้งาน:</b> บาง รพ. หัวหน้า/รองหัวหน้ายังขึ้นเวรเช้าทุกวัน (รวมเสาร์-อาทิตย์/นักขัตฤกษ์)<br>
-        🔓 ล็อกแล้วยังสามารถปลดล็อก cell ใดก็ได้ (โดยกดเข้าโหมดล็อก แล้วกด cell)<br>
-        🗓 ครอบคลุมทั้งเดือน: <b>${THAI_MONTHS[state.month-1]} ${state.year}</b>
-      </div>
-      <div style="margin-bottom:8px"><b>เลือกพยาบาลที่ต้องการล็อก:</b><div style="max-height:200px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-top:6px">${nurseOpts}</div></div>
-      <div style="margin-top:10px"><b>ขอบเขตวันที่:</b>
-        <label style="display:inline-block;margin-left:10px"><input type="radio" name="hscope" value="all" checked> ทั้งเดือน (1–${days})</label>
-        <label style="display:inline-block;margin-left:10px"><input type="radio" name="hscope" value="rest"> เฉพาะวันหยุด (เสาร์-อาทิตย์/นักขัตฤกษ์)</label>
-      </div>
-    </div>`,
-    showCancelButton: true,
-    showDenyButton: true,
-    denyButtonText: '🔓 ปลดล็อกหัวหน้าทั้งหมด',
-    confirmButtonText: '🔒 ล็อก ช',
-    cancelButtonText: 'ยกเลิก',
-    confirmButtonColor: '#dc2626',
-    denyButtonColor: '#64748b',
-    preConfirm: () => ({
-      nurseIds: Array.from(document.querySelectorAll('input[name=hn]:checked')).map(c=>c.value),
-      scope: document.querySelector('input[name=hscope]:checked').value
-    })
-  });
-  if (r.isDenied) {
-    let removed = 0;
-    heads.forEach(n => {
-      for (let d=1; d<=days; d++) {
-        const key = n.id + '-' + d;
-        if (state.pinnedShifts[key]) { delete state.pinnedShifts[key]; removed++; }
-      }
-    });
-    state.dirty = true;
-    refreshAllViews();
-    showSuccess('ปลดล็อกแล้ว', `${removed} เซลล์`);
-    return;
-  }
-  if (!r.isConfirmed) return;
-  const {nurseIds, scope} = r.value;
-  if (!nurseIds.length) return showError('ไม่ได้เลือกพยาบาล');
-  let count = 0;
-  nurseIds.forEach(nid => {
-    for (let d=1; d<=days; d++) {
-      if (scope === 'rest' && !isRestDay(state.year, state.month, d)) continue;
-      setPinned(nid, d, 'ช');
-      setShift(nid, d, 'ช');
-      count++;
-    }
-  });
+async function lockFormClearAll() {
+  const c = await confirmAct('ล้างล็อกทั้งหมด?', `ลบล็อกทั้งหมด ${Object.keys(state.pinnedShifts).length} เซลล์`, 'ล้าง');
+  if (!c.isConfirmed) return;
+  state.pinnedShifts = {};
   state.dirty = true;
   refreshAllViews();
-  showSuccess('ล็อกหัวหน้าเรียบร้อย', `${count} เซลล์ (${scope==='all'?'ทั้งเดือน':'เฉพาะวันหยุด'})`);
+  showSuccess('ล้างเรียบร้อย');
 }
 
 // ==================== HOLIDAY MANAGER ====================
@@ -3838,8 +3776,6 @@ document.addEventListener('DOMContentLoaded', () => {
     {selector: 'button[onclick*="saveAll"]', fn: () => saveAll()},
     {selector: 'button[onclick*="clearAll"]', fn: () => clearAll()},
     {selector: 'button[onclick*="togglePinMode"]', fn: () => togglePinMode()},
-    {selector: 'button[onclick*="openBulkPinDialog"]', fn: () => openBulkPinDialog()},
-    {selector: 'button[onclick*="openLockHeadsDialog"]', fn: () => openLockHeadsDialog()},
     {selector: 'button[onclick*="openHolidayManager"]', fn: () => openHolidayManager()},
     {selector: 'button[onclick*="openAddNurse"]', fn: () => openAddNurse()},
     {selector: 'button[onclick*="exportSchedule(\'xlsx\')"]', fn: () => exportSchedule('xlsx')},
