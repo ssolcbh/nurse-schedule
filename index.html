@@ -291,7 +291,7 @@ table.schedule td.stat-col[style*="0891b2"]{background:var(--brand)!important;co
   .main{padding:0}
   .card,.schedule-wrapper{box-shadow:none}
   .schedule-wrapper{max-height:none;overflow:visible}
-  .print-sig{display:block!important}
+  .print-sig,.print-head{display:block!important}
   table.schedule thead,table.schedule th,table.schedule td,table.schedule .sticky-col,table.schedule tfoot td{position:static!important}
 }
 /* ===== NEW: per-nurse night-double ban + daily totals ===== */
@@ -300,7 +300,13 @@ table.schedule td.stat-col[style*="0891b2"]{background:var(--brand)!important;co
 .nd-item.on{background:#fee2e2;border-color:#fca5a5;color:#991b1b;font-weight:700}
 .nd-item input{width:16px;height:16px;accent-color:#dc2626;cursor:pointer}
 /* ช่องลงชื่อสำหรับหน้าพิมพ์ — ซ่อนบนหน้าจอ แสดงเฉพาะตอนพิมพ์ */
-.print-sig{display:none}
+/* หัวรายงานสำหรับหน้าพิมพ์ — ซ่อนบนหน้าจอ แสดงเฉพาะตอนพิมพ์ จัดกึ่งกลาง */
+.print-sig,.print-head{display:none}
+.print-head{text-align:center;margin:0 0 12px;color:#0f172a}
+.print-head .ph-title{font-size:20px;font-weight:700}
+.print-head .ph-line{font-size:15px;margin-top:2px}
+.print-head .ph-month{font-size:16px;font-weight:700;margin-top:4px}
+.print-head .ph-req{font-size:12px;color:#475569;margin-top:2px}
 /* NEW: ห้ามขึ้นเวรดึกในวันเดียวกัน (ห้ามชนกัน) */
 .cell.boundary-block{outline:2px dashed #dc2626;outline-offset:-2px}
 .nc-note{font-size:.76rem;color:var(--ink-3);margin-top:6px}
@@ -442,6 +448,7 @@ table.schedule tfoot td.sum-low{color:#dc2626}
     <div id="warningBox"></div>
   </section>
   <section id="tab-schedule" class="tab-panel">
+    <div class="print-head"></div>
     <details class="policy-panel" id="policyPanel">
       <summary><svg class="ic"><use href="#i-sliders"/></svg> ตั้งค่าขั้นสูง (Hard Rules / Policy)</summary>
       <div style="margin-top:8px" id="policyRows"></div>
@@ -3283,6 +3290,18 @@ const SIGNATURE_TEXT = {
   name: '(........................................)',
   date: 'วันที่ ........ / ........ / ............'
 };
+// หัวรายงานของตารางเวร 5 บรรทัด — ใช้ชุดเดียวกันทั้ง Excel และหน้าพิมพ์
+function reportHeaderLines() {
+  const r = state.requirements;
+  const req = (k) => `ช=${r[k].ch}/บ=${r[k].ba}/ด=${r[k].du}${r[k].bd ? '/BD=' + r[k].bd : ''}`;
+  return [
+    'ตารางเวรประจำเดือน แผนก ER',
+    'ส่วนราชการ โรงพยาบาลแหลมฉบัง อำเภอศรีราชา จังหวัดชลบุรี',
+    'หน่วยงานการพยาบาลผู้ป่วยอุบัติเหตุฉุกเฉินและนิติเวช  กลุ่มงานการพยาบาล',
+    `ประจำเดือน ${THAI_MONTHS[state.month-1]}  พ.ศ. ${state.year}`,
+    `อัตรากำลัง  •  ธรรมดา ${req('weekday')}  •  เสาร์ ${req('saturday')}  •  อาทิตย์ ${req('sunday')}  •  หยุดราชการ ${req('holiday')}`
+  ];
+}
 // HTML ช่องลงชื่อ (ใช้กับ PDF และหน้าพิมพ์) — 4 บรรทัดเหมือน Excel: ลงชื่อ / (ชื่อ) / ตำแหน่ง / วันที่
 function signatureBlockHtml(fontPx, marginTopPx) {
   const box = label => `<div style="text-align:center">
@@ -3296,6 +3315,11 @@ function signatureBlockHtml(fontPx, marginTopPx) {
 // ช่องลงชื่อสำหรับหน้าพิมพ์ (window.print / Ctrl+P) — เติมให้ทุกตำแหน่งที่มี .print-sig
 function fillPrintSignatures() {
   document.querySelectorAll('.print-sig').forEach(el => { el.innerHTML = signatureBlockHtml(13, 36); });
+  // หัวรายงานตรงกลางด้านบน (เหมือนหัว Excel) — เติมทุกครั้งก่อนพิมพ์ให้ตรงกับเดือน/อัตรากำลังปัจจุบัน
+  const h = reportHeaderLines();
+  document.querySelectorAll('.print-head').forEach(el => {
+    el.innerHTML = `<div class="ph-title">${h[0]}</div><div class="ph-line">${h[1]}</div><div class="ph-line">${h[2]}</div><div class="ph-month">${h[3]}</div><div class="ph-req">${h[4]}</div>`;
+  });
 }
 window.addEventListener('beforeprint', fillPrintSignatures);
 
@@ -3443,12 +3467,7 @@ async function exportScheduleExcel() {
   const totalCols = 3 + days + 11;
   const aoa = [];
   // ── HEADER ──
-  aoa.push(['ตารางเวรประจำเดือน แผนก ER']);
-  aoa.push(['ส่วนราชการ โรงพยาบาลแหลมฉบัง อำเภอศรีราชา จังหวัดชลบุรี']);
-  aoa.push(['หน่วยงานการพยาบาลผู้ป่วยอุบัติเหตุฉุกเฉินและนิติเวช  กลุ่มงานการพยาบาล']);
-  aoa.push([`ประจำเดือน ${THAI_MONTHS[state.month-1]}  พ.ศ. ${state.year}`]);
-  const r = state.requirements;
-  aoa.push([`อัตรากำลัง  •  ธรรมดา ช=${r.weekday.ch}/บ=${r.weekday.ba}/ด=${r.weekday.du}${r.weekday.bd?'/BD='+r.weekday.bd:''}  •  เสาร์ ช=${r.saturday.ch}/บ=${r.saturday.ba}/ด=${r.saturday.du}${r.saturday.bd?'/BD='+r.saturday.bd:''}  •  อาทิตย์ ช=${r.sunday.ch}/บ=${r.sunday.ba}/ด=${r.sunday.du}${r.sunday.bd?'/BD='+r.sunday.bd:''}  •  หยุดราชการ ช=${r.holiday.ch}/บ=${r.holiday.ba}/ด=${r.holiday.du}${r.holiday.bd?'/BD='+r.holiday.bd:''}`]);
+  reportHeaderLines().forEach(t => aoa.push([t]));  // หัวรายงาน 5 บรรทัด (ใช้ชุดเดียวกับหน้าพิมพ์)
   aoa.push([]);
   // ── TABLE HEADERS ──
   const header = ['ที่','ชื่อ-นามสกุล','ตำแหน่ง'];
