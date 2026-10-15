@@ -292,6 +292,7 @@ table.schedule td.stat-col[style*="0891b2"]{background:var(--brand)!important;co
   .card,.schedule-wrapper{box-shadow:none}
   .schedule-wrapper{max-height:none;overflow:visible}
   .print-sig{display:block!important}
+  table.schedule thead,table.schedule th,table.schedule td,table.schedule .sticky-col,table.schedule tfoot td{position:static!important}
 }
 /* ===== NEW: per-nurse night-double ban + daily totals ===== */
 .nd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 12px;margin-top:8px}
@@ -3496,6 +3497,17 @@ async function exportScheduleExcel() {
   showSuccess('ส่งออก Excel เรียบร้อย', '<small>📄 แนวนอน A4 · พอดี 1 หน้า</small>');
 }
 
+// html2canvas วาดตำแหน่ง sticky ผิด (หัวตารางลอยกลางตาราง, คอลัมน์ชื่อ/ตำแหน่งหาย, แถวรวมไปอยู่ผิดที่)
+// จึงแปลงทุกองค์ประกอบที่เป็น position:sticky ในสำเนาที่ใช้จับภาพให้เป็น static ก่อน (ไม่กระทบตารางบนหน้าจอ)
+function flattenStickyForCapture(root) {
+  root.querySelectorAll('*').forEach(el => {
+    if (getComputedStyle(el).position === 'sticky') {
+      el.style.position = 'static';
+      el.style.left = 'auto'; el.style.top = 'auto'; el.style.bottom = 'auto';
+    }
+  });
+}
+
 async function exportSchedulePDF() {
   Swal.fire({title:'กำลังสร้าง PDF...',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
   await new Promise(r => setTimeout(r, 100));
@@ -3527,6 +3539,8 @@ async function exportSchedulePDF() {
     clone.style.border = '1px solid #cbd5e1';
     container.querySelector('#pdfTableSlot').appendChild(clone);
     document.body.appendChild(container);
+    flattenStickyForCapture(container);
+    if (container.scrollWidth > 0) container.style.width = container.scrollWidth + 'px'; // กันตารางกว้างถูกตัดด้านขวา
     const canvas = await html2canvas(container, {scale:1.4, backgroundColor:'#fff'});
     document.body.removeChild(container);
     const {jsPDF} = window.jspdf;
